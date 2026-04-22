@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Camera, Pause, Play, Save, AlertTriangle } from "lucide-react";
 import { ResultBanner } from "@/components/ResultBanner";
 import { BoundingBoxCanvas } from "@/components/BoundingBoxCanvas";
-import { analyzeImage, logDetection } from "@/lib/api";
+import { analyzeImage, logDetection, RateLimitError, PaymentRequiredError } from "@/lib/api";
 import type { DetectionResult } from "@/lib/detection";
 
 export const Route = createFileRoute("/scan/live")({
@@ -17,7 +17,8 @@ export const Route = createFileRoute("/scan/live")({
   component: LiveScan,
 });
 
-const SCAN_INTERVAL_MS = 2200;
+const SCAN_INTERVAL_MS = 4000;
+const BACKOFF_MAX_MS = 30000;
 
 function LiveScan() {
   const videoRef = useRef<HTMLVideoElement>(null);
