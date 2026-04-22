@@ -21,6 +21,7 @@ export function SiteHeader() {
         <nav className="hidden md:flex items-center gap-1 text-sm">
           <NavLink to="/scan/live">Live Detection</NavLink>
           <NavLink to="/scan/upload">Capture / Upload</NavLink>
+          <NavLink to="/scan/history">My History</NavLink>
           <NavLink to="/admin">Admin</NavLink>
         </nav>
         <Link
