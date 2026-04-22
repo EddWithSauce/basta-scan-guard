@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as ScanUploadRouteImport } from './routes/scan.upload'
 import { Route as ScanLiveRouteImport } from './routes/scan.live'
+import { Route as ScanHistoryRouteImport } from './routes/scan.history'
 import { Route as AdminLoginRouteImport } from './routes/admin.login'
 
 const IndexRoute = IndexRouteImport.update({
@@ -35,6 +36,11 @@ const ScanLiveRoute = ScanLiveRouteImport.update({
   path: '/scan/live',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ScanHistoryRoute = ScanHistoryRouteImport.update({
+  id: '/scan/history',
+  path: '/scan/history',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminLoginRoute = AdminLoginRouteImport.update({
   id: '/admin/login',
   path: '/admin/login',
@@ -44,6 +50,7 @@ const AdminLoginRoute = AdminLoginRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin/login': typeof AdminLoginRoute
+  '/scan/history': typeof ScanHistoryRoute
   '/scan/live': typeof ScanLiveRoute
   '/scan/upload': typeof ScanUploadRoute
   '/admin/': typeof AdminIndexRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin/login': typeof AdminLoginRoute
+  '/scan/history': typeof ScanHistoryRoute
   '/scan/live': typeof ScanLiveRoute
   '/scan/upload': typeof ScanUploadRoute
   '/admin': typeof AdminIndexRoute
@@ -59,19 +67,33 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin/login': typeof AdminLoginRoute
+  '/scan/history': typeof ScanHistoryRoute
   '/scan/live': typeof ScanLiveRoute
   '/scan/upload': typeof ScanUploadRoute
   '/admin/': typeof AdminIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin/login' | '/scan/live' | '/scan/upload' | '/admin/'
+  fullPaths:
+    | '/'
+    | '/admin/login'
+    | '/scan/history'
+    | '/scan/live'
+    | '/scan/upload'
+    | '/admin/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin/login' | '/scan/live' | '/scan/upload' | '/admin'
+  to:
+    | '/'
+    | '/admin/login'
+    | '/scan/history'
+    | '/scan/live'
+    | '/scan/upload'
+    | '/admin'
   id:
     | '__root__'
     | '/'
     | '/admin/login'
+    | '/scan/history'
     | '/scan/live'
     | '/scan/upload'
     | '/admin/'
@@ -80,6 +102,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminLoginRoute: typeof AdminLoginRoute
+  ScanHistoryRoute: typeof ScanHistoryRoute
   ScanLiveRoute: typeof ScanLiveRoute
   ScanUploadRoute: typeof ScanUploadRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -115,6 +138,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ScanLiveRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/scan/history': {
+      id: '/scan/history'
+      path: '/scan/history'
+      fullPath: '/scan/history'
+      preLoaderRoute: typeof ScanHistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/login': {
       id: '/admin/login'
       path: '/admin/login'
@@ -128,6 +158,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminLoginRoute: AdminLoginRoute,
+  ScanHistoryRoute: ScanHistoryRoute,
   ScanLiveRoute: ScanLiveRoute,
   ScanUploadRoute: ScanUploadRoute,
   AdminIndexRoute: AdminIndexRoute,
@@ -135,12 +166,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}
