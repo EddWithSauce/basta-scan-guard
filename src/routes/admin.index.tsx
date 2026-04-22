@@ -72,7 +72,7 @@ function AdminDashboard() {
     }
     const { data, error } = await query;
     if (error) toast.error("Failed to load logs", { description: error.message });
-    setLogs((data as LogRow[]) ?? []);
+    setLogs((data as unknown as LogRow[]) ?? []);
     setLoading(false);
   }, [statusFilter, dateFrom, dateTo]);
 
