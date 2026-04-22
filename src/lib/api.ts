@@ -2,15 +2,26 @@ import { supabase } from "@/integrations/supabase/client";
 import type { DetectionResult, DetectionSource } from "./detection";
 import { getSessionId } from "./detection";
 
+export class RateLimitError extends Error {
+  constructor(msg = "Rate limited") { super(msg); this.name = "RateLimitError"; }
+}
+export class PaymentRequiredError extends Error {
+  constructor(msg = "AI credits exhausted") { super(msg); this.name = "PaymentRequiredError"; }
+}
+
 export async function analyzeImage(dataUrl: string): Promise<DetectionResult> {
   const { data, error } = await supabase.functions.invoke<DetectionResult>("detect-weapon", {
     body: { imageBase64: dataUrl },
   });
-  if (error) {
-    const msg = error.message || "Detection failed";
-    throw new Error(msg);
+  // supabase-js puts the JSON body on `data` even when status is non-2xx in newer versions,
+  // but on errors `data` may be null. Try to read either.
+  const errMsg: string | undefined = (data as any)?.error || error?.message;
+  if (errMsg) {
+    if (/rate limit|429|rate_limited/i.test(errMsg)) throw new RateLimitError(errMsg);
+    if (/credits|402|payment/i.test(errMsg)) throw new PaymentRequiredError(errMsg);
+    throw new Error(errMsg);
   }
-  if (!data) throw new Error("No response from detection service");
+  if (!data || !(data as any).status) throw new Error("No response from detection service");
   return data;
 }
 
