@@ -71,20 +71,30 @@ function LiveScan() {
     return canvas.toDataURL("image/jpeg", 0.85);
   }, []);
 
-  // Continuous scan loop
+  // Continuous scan loop with adaptive backoff for rate limits
   useEffect(() => {
     if (!streaming || paused) return;
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let delay = SCAN_INTERVAL_MS;
+
     const tick = async () => {
-      if (cancelled || inFlight.current) return;
+      if (cancelled || inFlight.current) {
+        if (!cancelled) timeoutId = setTimeout(tick, delay);
+        return;
+      }
       const dataUrl = captureFrame();
-      if (!dataUrl) return;
+      if (!dataUrl) {
+        if (!cancelled) timeoutId = setTimeout(tick, delay);
+        return;
+      }
       inFlight.current = true;
       setScanning(true);
       try {
         const r = await analyzeImage(dataUrl);
         if (cancelled) return;
         setResult(r);
+        delay = SCAN_INTERVAL_MS; // reset backoff on success
         logDetection({ source: "live", result: r, dataUrl, saveImage: saveSnapshots && r.status === "NOT_ALLOWED" });
         if (r.status === "NOT_ALLOWED") {
           toast.error("Weapon detected — NOT ALLOWED", {
@@ -92,16 +102,34 @@ function LiveScan() {
           });
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "Detection failed";
-        if (!cancelled) toast.error("Scan failed", { description: msg });
+        if (cancelled) return;
+        if (e instanceof RateLimitError) {
+          delay = Math.min(delay * 2, BACKOFF_MAX_MS);
+          toast.warning("Slowing down — AI rate limit", {
+            description: `Retrying in ${Math.round(delay / 1000)}s. Free-tier limits apply.`,
+            id: "rate-limit",
+          });
+        } else if (e instanceof PaymentRequiredError) {
+          toast.error("AI credits exhausted", {
+            description: "Add credits in Workspace → Usage to continue scanning.",
+            id: "credits",
+          });
+          delay = BACKOFF_MAX_MS;
+        } else {
+          const msg = e instanceof Error ? e.message : "Detection failed";
+          toast.error("Scan failed", { description: msg });
+        }
       } finally {
         inFlight.current = false;
         setScanning(false);
+        if (!cancelled) timeoutId = setTimeout(tick, delay);
       }
     };
-    const id = setInterval(tick, SCAN_INTERVAL_MS);
     tick();
-    return () => { cancelled = true; clearInterval(id); };
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [streaming, paused, captureFrame, saveSnapshots]);
 
   return (
