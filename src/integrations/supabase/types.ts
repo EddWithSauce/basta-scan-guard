@@ -16,37 +16,93 @@ export type Database = {
     Tables: {
       detection_logs: {
         Row: {
+          confidence_scores: number[]
           created_at: string
-          detected_objects: Json
+          detected_labels: string[]
+          final_status: string
           id: string
-          image_path: string | null
-          max_confidence: number | null
-          session_id: string | null
-          source: Database["public"]["Enums"]["detection_source"]
-          status: Database["public"]["Enums"]["detection_status"]
-          user_id: string | null
+          image_url: string | null
+          notes: string | null
+          scan_type: string
+        }
+        Insert: {
+          confidence_scores?: number[]
+          created_at?: string
+          detected_labels?: string[]
+          final_status: string
+          id?: string
+          image_url?: string | null
+          notes?: string | null
+          scan_type: string
+        }
+        Update: {
+          confidence_scores?: number[]
+          created_at?: string
+          detected_labels?: string[]
+          final_status?: string
+          id?: string
+          image_url?: string | null
+          notes?: string | null
+          scan_type?: string
+        }
+        Relationships: []
+      }
+      scan_images: {
+        Row: {
+          created_at: string
+          detection_log_id: string | null
+          id: string
+          mime_type: string | null
+          public_url: string | null
+          size_bytes: number | null
+          storage_path: string
         }
         Insert: {
           created_at?: string
-          detected_objects?: Json
+          detection_log_id?: string | null
           id?: string
-          image_path?: string | null
-          max_confidence?: number | null
-          session_id?: string | null
-          source: Database["public"]["Enums"]["detection_source"]
-          status: Database["public"]["Enums"]["detection_status"]
-          user_id?: string | null
+          mime_type?: string | null
+          public_url?: string | null
+          size_bytes?: number | null
+          storage_path: string
         }
         Update: {
           created_at?: string
-          detected_objects?: Json
+          detection_log_id?: string | null
           id?: string
-          image_path?: string | null
-          max_confidence?: number | null
-          session_id?: string | null
-          source?: Database["public"]["Enums"]["detection_source"]
-          status?: Database["public"]["Enums"]["detection_status"]
-          user_id?: string | null
+          mime_type?: string | null
+          public_url?: string | null
+          size_bytes?: number | null
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scan_images_detection_log_id_fkey"
+            columns: ["detection_log_id"]
+            isOneToOne: false
+            referencedRelation: "detection_logs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      system_settings: {
+        Row: {
+          id: string
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          id?: string
+          key: string
+          updated_at?: string
+          value?: Json
+        }
+        Update: {
+          id?: string
+          key?: string
+          updated_at?: string
+          value?: Json
         }
         Relationships: []
       }
@@ -86,8 +142,6 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "user"
-      detection_source: "live" | "capture" | "upload"
-      detection_status: "ALLOWED" | "NOT_ALLOWED" | "UNSURE"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -216,8 +270,6 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "user"],
-      detection_source: ["live", "capture", "upload"],
-      detection_status: ["ALLOWED", "NOT_ALLOWED", "UNSURE"],
     },
   },
 } as const

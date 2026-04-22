@@ -1,158 +1,200 @@
-// AI weapon detection via Lovable AI Gateway (Gemini vision + tool-call structured output)
+// Deadly weapon detection via Lovable AI Gateway (Gemini Vision).
+// Accepts a base64-encoded image and returns a strict JSON verdict.
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const WEAPON_KEYWORDS = [
-  "knife", "blade", "axe", "hatchet", "sword", "gun", "handgun", "pistol",
-  "rifle", "firearm", "machete", "dagger", "katana", "revolver", "shotgun",
-  "switchblade", "bayonet", "cleaver",
-];
+interface ReqBody {
+  imageBase64?: string; // data URL OR raw base64
+  mimeType?: string;
+}
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+const SYSTEM_PROMPT = `You are a security screening vision model for an entry checkpoint.
+Your ONLY job is to decide whether the image contains a DEADLY WEAPON.
 
-  try {
-    const { imageBase64 } = await req.json();
-    if (!imageBase64) {
-      return new Response(JSON.stringify({ error: "imageBase64 required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+Deadly weapons (NOT_ALLOWED) include any of:
+- Firearms: gun, handgun, pistol, revolver, rifle, shotgun, submachine gun, assault rifle
+- Bladed weapons: knife, dagger, blade, machete, sword, katana, axe, hatchet, cleaver, switchblade
+- Other: bow with arrows, crossbow, brass knuckles, taser, stun gun, grenade
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
+ALWAYS ALLOWED (this is a SCHOOL checkpoint — common school materials are permitted):
+- Scissors (any kind, including craft, art, or office scissors)
+- Pencils, pens, markers, highlighters, crayons
+- Rulers, protractors, compasses (geometry set), staplers, paper clips, push pins
+- Calculators, notebooks, books, folders, binders, backpacks, lunch boxes
+- Art supplies, glue, tape, erasers, sharpeners
+- Laptops, tablets, phones, chargers, headphones
+- Sports gear (balls, rackets, jump ropes), musical instruments
 
-    const dataUrl = imageBase64.startsWith("data:")
-      ? imageBase64
-      : `data:image/jpeg;base64,${imageBase64}`;
+Decision rules:
+- If you clearly see a deadly weapon -> status="NOT_ALLOWED"
+- If the only sharp/pointy items are school materials from the ALLOWED list above -> status="ALLOWED"
+- If image is clearly safe (no weapon, just a person/object/empty scene) -> status="ALLOWED"
+- If image is too blurry, too dark, ambiguous, or you are not confident -> status="UNSURE"
 
-    const systemPrompt = `You are a strict weapon-detection vision system for a security checkpoint.
-Analyze the image and identify visible objects. Determine if any DEADLY WEAPON is present.
-Deadly weapons include: knife, blade, axe, hatchet, sword, gun, handgun, pistol, rifle, firearm, machete, dagger, katana, revolver, shotgun, switchblade, bayonet, cleaver.
-Do NOT flag harmless items (phones, pens, keys, tools like screwdrivers, kitchen utensils that aren't knives, toys clearly identifiable as toys).
-If the image is too blurry, dark, empty, or you cannot identify objects with reasonable confidence, return image_quality="unclear".
-For each detected object provide a normalized bounding box [x, y, w, h] where 0..1 of image dimensions.
-Confidence is 0..1. Only include objects you actually see.`;
+Toy guns, water guns, plastic obvious-toy weapons should be ALLOWED but mention them in objects.
+Scissors and school supplies must NEVER be reported in the "weapons" array — put them in "objects".
 
-    const body = {
+For EVERY weapon you detect you MUST also return a bounding box.
+The bbox MUST be an array of 4 numbers in NORMALIZED 0.0-1.0 coordinates,
+in the order [x, y, width, height], where (x, y) is the TOP-LEFT corner of
+the box relative to the full image, and width/height are the box size.
+Do NOT use [ymin, xmin, ymax, xmax]. Do NOT use 0-1000 pixel coords.
+If you truly cannot localize a weapon, omit the bbox entirely.
+
+Respond with ONLY a single JSON object via the tool call. No prose.`;
+
+async function callLovableAI(imageDataUrl: string, apiKey: string) {
+  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
       model: "google/gemini-2.5-flash",
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
           content: [
-            { type: "text", text: "Analyze this image for deadly weapons." },
-            { type: "image_url", image_url: { url: dataUrl } },
+            { type: "text", text: "Analyze this image. Use the report_detection tool." },
+            { type: "image_url", image_url: { url: imageDataUrl } },
           ],
         },
       ],
-      tools: [{
-        type: "function",
-        function: {
-          name: "report_detection",
-          description: "Report detected objects and weapon assessment.",
-          parameters: {
-            type: "object",
-            properties: {
-              image_quality: { type: "string", enum: ["clear", "unclear"] },
-              objects: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: { type: "string" },
-                    is_weapon: { type: "boolean" },
-                    confidence: { type: "number" },
-                    bbox: { type: "array", items: { type: "number" }, minItems: 4, maxItems: 4 },
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "report_detection",
+            description: "Report the weapon detection verdict for the image.",
+            parameters: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                status: {
+                  type: "string",
+                  enum: ["ALLOWED", "NOT_ALLOWED", "UNSURE"],
+                  description: "Final decision.",
+                },
+                reason: {
+                  type: "string",
+                  description: "Short human-readable explanation (max 120 chars).",
+                },
+                weapons: {
+                  type: "array",
+                  description: "Deadly weapons detected. Empty if none.",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      label: {
+                        type: "string",
+                        description:
+                          "Weapon name in lowercase, e.g. gun, knife, machete, sword, axe.",
+                      },
+                      confidence: {
+                        type: "number",
+                        description: "0.0 - 1.0",
+                      },
+                      bbox: {
+                        type: "array",
+                        description:
+                          "Optional bounding box in normalized 0-1 coords [x, y, width, height].",
+                        items: { type: "number" },
+                        minItems: 4,
+                        maxItems: 4,
+                      },
+                    },
+                    required: ["label", "confidence"],
                   },
-                  required: ["name", "is_weapon", "confidence", "bbox"],
-                  additionalProperties: false,
+                },
+                objects: {
+                  type: "array",
+                  description: "Other notable non-weapon objects visible.",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      label: { type: "string" },
+                      confidence: { type: "number" },
+                    },
+                    required: ["label", "confidence"],
+                  },
                 },
               },
+              required: ["status", "weapons", "objects", "reason"],
             },
-            required: ["image_quality", "objects"],
-            additionalProperties: false,
           },
         },
-      }],
+      ],
       tool_choice: { type: "function", function: { name: "report_detection" } },
-    };
+    }),
+  });
 
-    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
+  if (!response.ok) {
+    const txt = await response.text();
+    throw new Error(`AI gateway ${response.status}: ${txt.slice(0, 400)}`);
+  }
+  const json = await response.json();
+  const call = json?.choices?.[0]?.message?.tool_calls?.[0];
+  if (!call?.function?.arguments) {
+    throw new Error("AI returned no tool call");
+  }
+  return JSON.parse(call.function.arguments);
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  }
 
-    if (!aiRes.ok) {
-      const t = await aiRes.text();
-      console.error("AI gateway error", aiRes.status, t);
-      if (aiRes.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please retry shortly." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (aiRes.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Add funds to continue." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "AI gateway error" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+  try {
+    const apiKey = Deno.env.get("LOVABLE_API_KEY");
+    if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
+
+    const body = (await req.json()) as ReqBody;
+    if (!body?.imageBase64 || typeof body.imageBase64 !== "string") {
+      return new Response(JSON.stringify({ error: "imageBase64 is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const data = await aiRes.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) {
-      return new Response(JSON.stringify({
-        status: "UNSURE", objects: [], image_quality: "unclear", max_confidence: 0,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
+    const imageDataUrl = body.imageBase64.startsWith("data:")
+      ? body.imageBase64
+      : `data:${body.mimeType || "image/jpeg"};base64,${body.imageBase64}`;
 
-    let parsed: { image_quality: string; objects: Array<{ name: string; is_weapon: boolean; confidence: number; bbox: number[] }> };
-    try {
-      parsed = JSON.parse(toolCall.function.arguments);
-    } catch {
-      parsed = { image_quality: "unclear", objects: [] };
-    }
+    const verdict = await callLovableAI(imageDataUrl, apiKey);
 
-    // Decision logic
-    const objects = parsed.objects || [];
-    // Reinforce keyword matching (model may not always set is_weapon correctly)
-    const enriched = objects.map((o) => ({
-      ...o,
-      is_weapon: o.is_weapon || WEAPON_KEYWORDS.some((k) => o.name.toLowerCase().includes(k)),
-    }));
-
-    const weapons = enriched.filter((o) => o.is_weapon && o.confidence >= 0.5);
-    const maxConf = enriched.reduce((m, o) => Math.max(m, o.confidence || 0), 0);
-
-    let status: "ALLOWED" | "NOT_ALLOWED" | "UNSURE";
-    if (parsed.image_quality === "unclear" || (enriched.length === 0 && maxConf < 0.3)) {
-      status = "UNSURE";
-    } else if (weapons.length > 0) {
-      status = "NOT_ALLOWED";
-    } else {
-      status = "ALLOWED";
-    }
-
-    return new Response(JSON.stringify({
-      status,
-      objects: enriched,
-      image_quality: parsed.image_quality,
-      max_confidence: maxConf,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  } catch (e) {
-    console.error("detect-weapon error", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return new Response(JSON.stringify(verdict), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    const isRate = message.includes("429");
+    const isPay = message.includes("402");
+    console.error("detect-weapon error:", message);
+    return new Response(
+      JSON.stringify({
+        error: message,
+        code: isRate ? "rate_limited" : isPay ? "payment_required" : "internal",
+      }),
+      {
+        status: isRate ? 429 : isPay ? 402 : 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 });

@@ -1,0 +1,1 @@
+DROP POLICY IF EXISTS "Public can read scan files" ON storage.objects;
